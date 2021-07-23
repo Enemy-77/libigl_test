@@ -13,7 +13,6 @@ include_directories(D:/OpenMesh/OpenMesh/include)
 
 link_directories(D:/OpenMesh/OpenMesh/lib)
 
-# Add your project files
-file(GLOB SRC_FILES *.cpp)
-add_executable(${PROJECT_NAME} ${SRC_FILES})
-target_link_libraries(${PROJECT_NAME} PUBLIC igl::core igl::opengl_glfw OpenMeshCored OpenMeshToolsd)
+add_subdirectory(src)
+
+
