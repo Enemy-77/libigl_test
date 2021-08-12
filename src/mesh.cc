@@ -1,4 +1,10 @@
 #include "mesh.h"
+#include <Eigen/sparse>
+#include <Eigen/SparseCholesky>
+#include <Eigen/SparseQR>
+
+using SpMatf = Eigen::SparseMatrix<double>;
+using Tplf = Eigen::Triplet<double>;
 
 Mesh::Mesh(const std::string& file_name) {
     if (!read_mesh(mesh_, file_name, ropt_)) {
@@ -73,8 +79,7 @@ static double angle(const MyMesh& mesh, const MyMesh::HalfedgeHandle& voh_it, co
     return std::acos(cos_result);
 }
 
-
-void Mesh::mean_curvature_flow(float lambda) {
+void Mesh::local_laplacian(float lambda) {
     MyMesh::VertexIter v_it, v_begin, v_end;
     v_begin = mesh_.vertices_begin();
     v_end = mesh_.vertices_end();
@@ -96,9 +101,67 @@ void Mesh::mean_curvature_flow(float lambda) {
         }
         sum /= (4 * area);
         MyMesh::Point change = this_point + lambda * sum;
-
         mesh_.set_point(v_it, change);
     }
-    update_vertices();
+}
+
+void Mesh::global_laplacian() {
+    using pair_vec = std::vector<std::pair<int, double>>;
+    int n = V_.rows();
+    SpMatf sm(n, n);
+    Eigen::VectorXd b_x(n);
+    Eigen::VectorXd b_y(n);
+    Eigen::VectorXd b_z(n);
+   
+    MyMesh::VertexIter v_it, v_begin, v_end;
+    v_begin = mesh_.vertices_begin();
+    v_end = mesh_.vertices_end();
+    std::vector<Tplf> triplets;
+    for (v_it = v_begin; v_it != v_end; ++v_it) {
+        triplets.emplace_back(v_it->idx(), v_it->idx(), 1.f);
+        if (v_it->is_boundary()) {
+            Vec3f p = mesh_.point(v_it);
+            b_x(v_it->idx()) = p[0];
+            b_y(v_it->idx()) = p[1];
+            b_z(v_it->idx()) = p[2];
+        } else {
+            MyMesh::Point this_point = mesh_.point(v_it);
+            double sum = 0;
+            pair_vec idx_sum;
+            MyMesh::VertexOHalfedgeIter voh_it;
+            for (voh_it = mesh_.voh_iter(v_it); voh_it.is_valid(); ++voh_it) {
+                int idx = voh_it->to().idx();
+                MyMesh::HalfedgeHandle opposite = voh_it->opp();
+                double alpha = angle(mesh_, voh_it, this_point);
+                double beta = angle(mesh_, opposite, this_point);
+                double sum_up = 1.0f / std::tan(alpha) + 1.0f / std::tan(beta);
+                idx_sum.emplace_back(idx, sum_up);
+                sum += sum_up;
+            }
+            for (auto& pv : idx_sum) {
+                triplets.emplace_back(v_it->idx(), pv.first, -pv.second / sum);
+            }
+            b_x(v_it->idx()) = 0.f;
+            b_y(v_it->idx()) = 0.f;
+            b_z(v_it->idx()) = 0.f;
+        }
+    }
+    sm.setFromTriplets(triplets.begin(), triplets.end());
+    Eigen::VectorXd result_x;
+    Eigen::VectorXd result_y;
+    Eigen::VectorXd result_z;
+    //Eigen::SparseLU<SpMatf> solver;
+    Eigen::SparseQR<SpMatf, Eigen::COLAMDOrdering<int>> solver;
+    solver.compute(sm);
+    result_x = solver.solve(b_x);
+    result_y = solver.solve(b_y);
+    result_z = solver.solve(b_z);
+    for (MyMesh::VertexIter v_it = mesh_.vertices_begin(); v_it != mesh_.vertices_end(); ++v_it) {
+        if (!v_it->is_boundary()) {
+            int idx = (*v_it).idx();
+            MyMesh::Point tp(result_x(idx), result_y(idx), result_z(idx));
+            mesh_.set_point(*v_it, tp);
+        }
+    }
 }
 

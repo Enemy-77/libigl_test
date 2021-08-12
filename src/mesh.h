@@ -12,8 +12,11 @@ typedef TriMesh_ArrayKernelT<>  MyMesh;
 
 class Mesh {
 public:
+    Mesh() = default;
     explicit Mesh(const std::string& file_name);
-    void mean_curvature_flow(float lambda = 0.1);
+    void local_laplacian(float lambda = 0.1);
+    void global_laplacian();
+
     void update_vertices();
 
     MyMesh mesh_;
